@@ -1,8 +1,10 @@
 [map all mapfile.text]
 [org 0x7C00]
+
 [bits 16]
 
-%define load_start 0x7C00 + 512
+%define ADDR_OF_LOCAL(sym) ((sym - $$) + 0x7C00)
+%define FAR_READ(sym) [fs:((sym) - $$ + 512)]
 
 %define PAGE_PRESENT    (1 << 0)
 %define PAGE_WRITE      (1 << 1)
@@ -10,89 +12,92 @@
 %define CODE_SEG     0x0008
 %define DATA_SEG     0x0010
 
-section .boot start=0x7C00
-_entry16: 
-        jmp 0x00:start16
-
 start16:
         xor ax, ax
         mov ss, ax
 
-        mov sp, _entry16
+        mov sp, 0x7C00
 
-        mov ds, ax
+
         mov es, ax
-        mov fs, ax
+        mov ds, ax
         mov gs, ax
 
-        cld
+        mov ax, (0x7E00 / 16)
+        mov fs, ax
 
-        call check_cpu
-        jc .unsupported_cpu
-        
+        cld
+         
+    
         mov si, DiskPackage
         mov dl, 0x80
         mov ah, 0x42
         int 0x13
+        
         jc .disk_error
-
-        call setup_early_pagetables
 
         jmp _loaded16
 
-.startup_error: 
-        mov si, StartupError
-        call bios_print
-        jmp die 
- 
 .disk_error:
         mov si, DiskError
         call bios_print
         jmp die
 
-.unsupported_cpu:
-        mov si, UnsupportedCPU
-        call bios_print
-        jmp die
-
-%macro __pagetlb_setea 3
-        lea eax, %2
-        or eax, %3
-        mov [%1], eax
-%endmacro
-
-setup_early_pagetables: ; identity map the first 2MiB minus one 4KiB Page.
-        ; setup low PML4, PDP and PD with the respective effective addresses.
-        __pagetlb_setea pml4.low, [pdp.low], (PAGE_PRESENT | PAGE_WRITE)
-        __pagetlb_setea pdp.low, [pd.low], (PAGE_PRESENT | PAGE_WRITE)
-        __pagetlb_setea pd.low, [pt.low], (PAGE_PRESENT | PAGE_WRITE)
-
-        ; setup low PT, identity mapping
-        lea di, [pt.low] 
-        mov eax, PAGE_PRESENT | PAGE_WRITE
-        
-        .loop:
-            mov [di], eax
-            add eax, 0x1000
-            add di, 8
-            cmp eax, 0x200000 - 0x1000  ; end
-            jb .loop
-
-        ; the high part of the PML4 we set to all zeros so invalid acceses
-        ; trigger a fault instead of being ub we can still
-        ; avoid filling all the tables with zeros.
-        lea di, [pml4.high]
-        xor eax, eax
-        mov ecx, 0x1000
-        rep stosb
-
-        ; we leave the last page of the first 2M unmapped as a guard page
-        ; the rest of the page table remains uninitalized memory
-        ; expect for the pml4 with is filled with zeros
-        ret
 die: 
         hlt
         jmp die
+
+bios_print:
+    pushad
+.loop:
+    lodsb                             ; Load the value at [@es:@si] in @al.
+    test al, al                       ; If AL is the terminator character, stop printing.
+    je .done                 	
+    mov ah, 0x0E	
+    int 0x10
+    jmp .loop
+	
+.done:
+    popad                             ; Pop all general purpose registers to save them.
+    ret
+
+DiskPackage: 
+        db 0x10
+        db 0x00
+        dw 127
+        dw 0x7E00
+        dw 0
+        dd 1 ; LBA#1
+        dd 0    
+
+DiskError db "DISK", 0x0A, 0x0D, 0x00
+
+times (510 - ($ - $$)) db 0
+dw 0xAA55
+
+UnsupportedCPU db "CPU", 0x0A, 0x0D, 0x00
+StartupError db "UNK", 0x0A, 0x0D, 0x00 
+
+
+GDT:
+.Null:
+    dq 0x0000000000000000             ; Null Descriptor - should be present.
+
+.Code:
+    dq 0x00209A0000000000             ; 64-bit code descriptor (exec/read).
+    dq 0x0000920000000000             ; 64-bit data descriptor (read/write).
+      
+ALIGN 4
+    dw 0                              ; Padding to make the "address of the GDT" field aligned on a 4-byte boundary
+
+.Pointer:
+    dw $ - GDT - 1                    ; 16-bit Size (Limit) of GDT.
+    dd ADDR_OF_LOCAL(GDT)                            ; 32-bit Base Address of GDT. (CPU will zero extend to 64-bit)
+
+align 4
+IDTR:
+        .Limit dw 0
+        .Base dd 0
 
 check_cpu: ; is the CPU actually supported, does it have say long mode.
     pushfd                            ; Get flags in EAX register.
@@ -131,91 +136,94 @@ check_cpu: ; is the CPU actually supported, does it have say long mode.
     stc
     ret
 
-bios_print:
-    pushad
-.loop:
-    lodsb                             ; Load the value at [@es:@si] in @al.
-    test al, al                       ; If AL is the terminator character, stop printing.
-    je .done                 	
-    mov ah, 0x0E	
-    int 0x10
-    jmp .loop
-	
-.done:
-    popad                             ; Pop all general purpose registers to save them.
-    ret
-
-section .bootdata follows=.boot
-DiskError db "ERROR: Failed to read from boot disk.", 0x0A, 0x0D, 0x00
-UnsupportedCPU db "ERROR: CPU is not supported.", 0x0A, 0x0D, 0x00
-StartupError db "ERROR: Startup of real code failed", 0x0A, 0x0D, 0x00 
-
-DiskPackage: 
-        db 0x10
-        db 0x00
-        dw 16
-        dw load_start
-        dw 0
-        dd 1 ; LBA#1
-        dd 0
-        
-section .bootmagic start=(load_start - 2)
-dw 0xAA55
-
-section .text follows=.bootmagic
-_loaded16:
-                mov si, Message
-        call bios_print
-
-        ; TODO: Switch directly to long mode
-
-        jmp die
-
-section .data
 Message db "Hello, World!", 0x0A, 0x0D, 0x00
 
-GDT:
-.Null:
-    dq 0x0000000000000000             ; Null Descriptor - should be present.
+_loaded16:
 
-.Code:
-    dq 0x00209A0000000000             ; 64-bit code descriptor (exec/read).
-    dq 0x0000920000000000             ; 64-bit data descriptor (read/write).
+       mov si, Message
+        call bios_print
+    
+    cli 
+    ; Disable IRQs
+    mov al, 0xFF                      ; Out 0xFF to 0xA1 and 0x21 to disable all IRQs.
+    out 0xA1, al
+    out 0x21, al
+
+    lidt FAR_READ(IDTR)                        ; Load a zero length IDT so that any NMI causes a triple fault.
+
+    ; Enter long mode.
+    mov eax, 10100000b                ; Set the PAE and PGE bit.
+    mov cr4, eax
       
-ALIGN 4
-    dw 0                              ; Padding to make the "address of the GDT" field aligned on a 4-byte boundary
+    mov edx, paging.pml4                  ; Point CR3 at the PML4.
+    mov cr3, edx
+      
+    mov ecx, 0xC0000080               ; Read from the EFER MSR. 
+    rdmsr    
 
-.Pointer:
-    dw $ - GDT - 1                    ; 16-bit Size (Limit) of GDT.
-    dd GDT                            ; 32-bit Base Address of GDT. (CPU will zero extend to 64-bit)
+    or eax, 0x00000100                ; Set the LME bit.
+    wrmsr
 
-align 4
-IDTR:
-        .Limit dw 0
-        .Base dd 0
+    mov ebx, cr0                      ; Activate long mode -
+    or ebx,0x80000001                 ; - by enabling paging and protection simultaneously.
+    mov cr0, ebx                    
 
-section .padding
-times (0x2000 + 512)-($-$$) db 0
+    hlt
 
-; alias page tables (included), code cave page tabes (included). root page table (pml4), alised page
-; dynamically created: aliasing pdp, pd and the code cave pdp, pd (32Kib)
+    cli
+    lgdt FAR_READ(GDT.Pointer)                ; Load GDT.Pointer defined below
 
-section .bss nobits
-align 0x1000
-pagetables:
-pt: 
-        .low resq 512
-        .alias resq 512
-pml4:
-        .low resq 1
-        .high resq 511
-pdp:
-        .low resq 1
-        .high resq 511
-        .alias resq 512
-pd:
-        .low resq 1
-        .high resq 511
-        .alias resq 512
-pad: resq 512
-pagetables.size equ $ - pagetables
+      
+    jmp CODE_SEG:.long             ; Load CS with 64 bit segment and flush the instruction cache
+      
+.startup_error: 
+        mov si, StartupError
+        call bios_print
+        jmp die 
+
+.unsupported_cpu:
+        mov si, UnsupportedCPU
+        call bios_print
+        jmp die
+
+[bits 64]
+
+.long:
+    mov ax, DATA_SEG
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+
+    jmp _start
+
+_start:
+    int 0xAA
+    jmp $
+
+paging:
+  .pml4:
+    dq ADDR_OF_LOCAL(paging.pdp) | (PAGE_PRESENT | PAGE_WRITE)
+    times 511 dq dyndata.alias_pdp | (PAGE_PRESENT | PAGE_WRITE)
+  .pdp:
+    dq ADDR_OF_LOCAL(paging.pd) | (PAGE_PRESENT | PAGE_WRITE)
+    times 511 dq dyndata.alias_pd | (PAGE_PRESENT | PAGE_WRITE)
+  .pd:
+    dq ADDR_OF_LOCAL(paging.pt) | (PAGE_PRESENT | PAGE_WRITE)
+    times 511 dq dyndata.alias_pt | (PAGE_PRESENT | PAGE_WRITE)
+  .pt:
+    ; null page
+    dq 0x1000 | (PAGE_PRESENT | PAGE_WRITE)
+    %assign addr 0x1000
+    %rep 20
+      dq addr | (PAGE_PRESENT | PAGE_WRITE)
+    %assign addr addr+0x1000 
+    %endrep
+
+
+; pad to 64KiB
+times ((64 * 1024) - ($ - $$)) db 0
+
+
+%include "layout.asm"

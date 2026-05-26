@@ -1,8 +1,8 @@
 
 - NASM Map file ---------------------------------------------------------------
 
-Source file:  load.asm
-Output file:  load.bin
+Source file:  /tmp/nasmValidator/in.asm
+Output file:  /tmp/nasmValidator/out.o
 
 -- Program origin -------------------------------------------------------------
 
@@ -11,91 +11,19 @@ Output file:  load.bin
 -- Sections (summary) ---------------------------------------------------------
 
 Vstart            Start             Stop              Length    Class     Name
-            7C00              7C00              7CF8  000000F8  progbits  .boot
-            7CF8              7CF8              7D74  0000007C  progbits  .bootdata
-            7DFE              7DFE              7E00  00000002  progbits  .bootmagic
-            7E00              7E00              7E09  00000009  progbits  .text
-            7E0C              7E0C              7E42  00000036  progbits  .data
-            7E44              7E44              A044  00002200  progbits  .padding
-            B000              B000             13000  00008000  nobits    .bss
+            7C00              7C00             17C00  00010000  progbits  .text
 
 -- Sections (detailed) --------------------------------------------------------
-
----- Section .boot ------------------------------------------------------------
-
-class:     progbits
-length:                  F8
-start:                 7C00
-align:     not defined
-follows:   not defined
-vstart:                7C00
-valign:    not defined
-vfollows:  not defined
-
----- Section .bootdata --------------------------------------------------------
-
-class:     progbits
-length:                  7C
-start:                 7CF8
-align:                    4
-follows:   .boot
-vstart:                7CF8
-valign:    not defined
-vfollows:  not defined
-
----- Section .bootmagic -------------------------------------------------------
-
-class:     progbits
-length:                   2
-start:                 7DFE
-align:     not defined
-follows:   not defined
-vstart:                7DFE
-valign:    not defined
-vfollows:  not defined
 
 ---- Section .text ------------------------------------------------------------
 
 class:     progbits
-length:                   9
-start:                 7E00
-align:                    4
-follows:   .bootmagic
-vstart:                7E00
-valign:    not defined
-vfollows:  not defined
-
----- Section .data ------------------------------------------------------------
-
-class:     progbits
-length:                  36
-start:                 7E0C
+length:               10000
+start:                 7C00
 align:                    4
 follows:   not defined
-vstart:                7E0C
+vstart:                7C00
 valign:    not defined
-vfollows:  not defined
-
----- Section .padding ---------------------------------------------------------
-
-class:     progbits
-length:                2200
-start:                 7E44
-align:                    4
-follows:   not defined
-vstart:                7E44
-valign:    not defined
-vfollows:  not defined
-
----- Section .bss -------------------------------------------------------------
-
-class:     nobits
-length:                8000
-start:                 B000
-align:                 1000
-follows:   not defined
-vstart:                B000
-valign:                1000
 vfollows:  not defined
 
 -- Symbols --------------------------------------------------------------------
@@ -103,68 +31,47 @@ vfollows:  not defined
 ---- No Section ---------------------------------------------------------------
 
 Value     Name
-00008000  pagetables.size
+00001000  dyndata
+00001000  dyndata.alias_pdp
+00002000  dyndata.alias_pd
+00003000  dyndata.alias_pt
+00007000  early_stack
+00007C00  bootsec
+00007E00  loaded_binary
+00018000  video_page
 
-
----- Section .boot ------------------------------------------------------------
-
-Real              Virtual           Name
-            7C00              7C00  _entry16
-            7C05              7C05  start16
-            7C2B              7C2B  start16.startup_error
-            7C33              7C33  start16.disk_error
-            7C3B              7C3B  start16.unsupported_cpu
-            7C43              7C43  setup_early_pagetables
-            7C74              7C74  setup_early_pagetables.loop
-            7C98              7C98  die
-            7C9B              7C9B  check_cpu
-            7CE6              7CE6  check_cpu.unsupported
-            7CE8              7CE8  bios_print
-            7CEA              7CEA  bios_print.loop
-            7CF5              7CF5  bios_print.done
-
----- Section .bootdata --------------------------------------------------------
-
-Real              Virtual           Name
-            7CF8              7CF8  DiskError
-            7D20              7D20  UnsupportedCPU
-            7D3F              7D3F  StartupError
-            7D64              7D64  DiskPackage
 
 ---- Section .text ------------------------------------------------------------
 
 Real              Virtual           Name
-            7E00              7E00  _loaded16
-
----- Section .data ------------------------------------------------------------
-
-Real              Virtual           Name
-            7E0C              7E0C  Message
-            7E1C              7E1C  GDT
-            7E1C              7E1C  GDT.Null
-            7E24              7E24  GDT.Code
-            7E36              7E36  GDT.Pointer
-            7E3C              7E3C  IDTR
-            7E3C              7E3C  IDTR.Limit
-            7E3E              7E3E  IDTR.Base
-
----- Section .bss -------------------------------------------------------------
-
-Real              Virtual           Name
-            B000              B000  pagetables
-            B000              B000  pt
-            B000              B000  pt.low
-            C000              C000  pt.alias
-            D000              D000  pml4
-            D000              D000  pml4.low
-            D008              D008  pml4.high
-            E000              E000  pdp
-            E000              E000  pdp.low
-            E008              E008  pdp.high
-            F000              F000  pdp.alias
-           10000             10000  pd
-           10000             10000  pd.low
-           10008             10008  pd.high
-           11000             11000  pd.alias
-           12000             12000  pad
+            7C00              7C00  start16
+            7C21              7C21  start16.disk_error
+            7C29              7C29  die
+            7C2C              7C2C  bios_print
+            7C2E              7C2E  bios_print.loop
+            7C39              7C39  bios_print.done
+            7C3C              7C3C  DiskPackage
+            7C4C              7C4C  DiskError
+            7E00              7E00  UnsupportedCPU
+            7E06              7E06  StartupError
+            7E0C              7E0C  GDT
+            7E0C              7E0C  GDT.Null
+            7E14              7E14  GDT.Code
+            7E26              7E26  GDT.Pointer
+            7E2C              7E2C  IDTR
+            7E2C              7E2C  IDTR.Limit
+            7E2E              7E2E  IDTR.Base
+            7E32              7E32  check_cpu
+            7E7D              7E7D  check_cpu.unsupported
+            7E7F              7E7F  Message
+            7E8F              7E8F  _loaded16
+            7EDE              7EDE  _loaded16.startup_error
+            7EE7              7EE7  _loaded16.unsupported_cpu
+            7EF0              7EF0  _loaded16.long
+            7F00              7F00  _start
+            7F04              7F04  paging
+            7F04              7F04  paging.pml4
+            8F04              8F04  paging.pdp
+            9F04              9F04  paging.pd
+            AF04              AF04  paging.pt
 
