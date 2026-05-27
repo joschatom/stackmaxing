@@ -6,9 +6,10 @@
 %define ADDR_OF_LOCAL(sym) ((sym - $$) + 0x7C00)
 %define FAR_READ(sym) [fs:((sym) - $$ + 512)]
 
-%define PAGE_PRESENT    (1 << 0)
-%define PAGE_WRITE      (1 << 1)
- 
+%define PAGE_PRESENT            (1 << 0)
+%define PAGE_WRITE              (1 << 1)
+%define PAGE_WRITE_THROUGH      (1 << 3)
+
 %define CODE_SEG     0x0008
 %define DATA_SEG     0x0010
 
@@ -71,13 +72,13 @@ DiskPackage:
         dd 0    
 
 DiskError db "DISK", 0x0A, 0x0D, 0x00
-
-times (510 - ($ - $$)) db 0
-dw 0xAA55
-
 UnsupportedCPU db "CPU", 0x0A, 0x0D, 0x00
 StartupError db "UNK", 0x0A, 0x0D, 0x00 
 
+
+
+times (510 - ($ - $$)) db 0
+dw 0xAA55
 
 GDT:
 .Null:
@@ -99,51 +100,14 @@ IDTR:
         .Limit dw 0
         .Base dd 0
 
-check_cpu: ; is the CPU actually supported, does it have say long mode.
-    pushfd                            ; Get flags in EAX register.
-    
-    pop eax
-    mov ecx, eax  
-    xor eax, 0x200000 
-    push eax 
-    popfd
-
-    pushfd 
-    pop eax
-    xor eax, ecx
-    shr eax, 21 
-    and eax, 1                        ; Check whether bit 21 is set or not. If EAX now contains 0, CPUID isn't supported.
-    push ecx
-    popfd 
-
-    test eax, eax
-    jz .unsupported
-    
-    mov eax, 0x80000000   
-    cpuid                 
-    
-    cmp eax, 0x80000001               ; Check whether extended function 0x80000001 is available are not.
-    jb .unsupported
-
-    mov eax, 0x80000001  
-    cpuid                 
-    test edx, 1 << 29                 ; Test if the LM-bit, is set or not.
-    jz .unsupported
-
-    ret
-
-.unsupported:
-    stc
-    ret
-
-Message db "Hello, World!", 0x0A, 0x0D, 0x00
+stack_top dq -1
+Message db "Hello, World!$", 0x0A, 0x0D, 0x00
 
 _loaded16:
 
        mov si, Message
         call bios_print
     
-    cli 
     ; Disable IRQs
     mov al, 0xFF                      ; Out 0xFF to 0xA1 and 0x21 to disable all IRQs.
     out 0xA1, al
@@ -168,10 +132,8 @@ _loaded16:
     or ebx,0x80000001                 ; - by enabling paging and protection simultaneously.
     mov cr0, ebx                    
 
-    hlt
-
     cli
-    lgdt FAR_READ(GDT.Pointer)                ; Load GDT.Pointer defined below
+    lgdt [GDT.Pointer]                ; Load GDT.Pointer defined below
 
       
     jmp CODE_SEG:.long             ; Load CS with 64 bit segment and flush the instruction cache
@@ -198,14 +160,96 @@ _loaded16:
 
     jmp _start
 
-_start:
-    int 0xAA
-    jmp $
+;;; LONG MODE ;;;
 
+
+; setup links between alias page tables levels
+; and final page table to point to single backing page
+interlink_alias_pagetables:
+    push rcx
+    push rdi
+    push rax
+
+    ; PDP
+    mov rcx, 512
+    mov rdi, dyndata.alias_pdp
+    mov rax, dyndata.alias_pd | (PAGE_PRESENT | PAGE_WRITE)
+    rep stosq
+
+    ; PD
+    mov rcx, 512
+    mov rdi, dyndata.alias_pd
+    mov rax, dyndata.alias_pt | (PAGE_PRESENT | PAGE_WRITE)
+    rep stosq
+
+    ; PT
+    mov rcx, 512
+    mov rdi, dyndata.alias_pt
+    mov rax, backing_page | (PAGE_PRESENT | PAGE_WRITE)
+    rep stosq
+
+    ; flush page caches
+    mov rax, cr3
+    mov cr3, rax
+
+    pop rax
+    pop rdi
+    pop rcx
+
+    ret
+
+_start:
+    mov al, 'H'          ; Character 'H'
+    mov ah, 0x07         ; Attribute: Light gray text on black background
+    mov [0x18000], ax      ; Write both bytes to the screen
+
+    call interlink_alias_pagetables
+
+    mov rax, [-1]
+ 
+    mov rcx, 1000000000
+    mov r11, counter_fun
+    call run_fun_bounded
+
+    jmp guard_page
+
+counter_fun:
+    cmp rax, rcx
+    je .stop
+    inc rax
+    call counter_fun
+.stop: ret
+
+; run an recursive function on bounded yet giant stack. ;)
+; allows the function* given in [r11] to recurce 30+ *trillion* times without tail calls.
+; NOTE: the function must meet certain requirements. See `counter_fun` for details.
+run_fun_bounded:
+    mov [dyndata.old_stack], rsp
+    mov rsp, 0x1000
+
+    call r11
+
+    mov [dyndata.reached_rsp], rsp
+    mov rsp, [dyndata.old_stack] ; restore
+
+    ret
+
+
+%define ALIGN_PADDING(addr, align) (align - (addr & (align - 1))) & (align - 1);
+%macro ALIGN_PAD 1
+    times ALIGN_PADDING(ADDR_OF_LOCAL($), 0x1000) db 0
+%endmacro
+
+ALIGN_PAD 0x1000
 paging:
   .pml4:
     dq ADDR_OF_LOCAL(paging.pdp) | (PAGE_PRESENT | PAGE_WRITE)
+    %ifdef QEMU_MEMORY_DEBUG
+    dq dyndata.alias_pdp | (PAGE_PRESENT | PAGE_WRITE)
+    times 510 dq 0x00
+    %else 
     times 511 dq dyndata.alias_pdp | (PAGE_PRESENT | PAGE_WRITE)
+    %endif
   .pdp:
     dq ADDR_OF_LOCAL(paging.pd) | (PAGE_PRESENT | PAGE_WRITE)
     times 511 dq dyndata.alias_pd | (PAGE_PRESENT | PAGE_WRITE)
@@ -214,16 +258,21 @@ paging:
     times 511 dq dyndata.alias_pt | (PAGE_PRESENT | PAGE_WRITE)
   .pt:
     ; null page
-    dq 0x1000 | (PAGE_PRESENT | PAGE_WRITE)
+    dq 0x21000 | (PAGE_PRESENT | PAGE_WRITE)
     %assign addr 0x1000
-    %rep 20
+    %rep (0x17000) / 0x1000
       dq addr | (PAGE_PRESENT | PAGE_WRITE)
-    %assign addr addr+0x1000 
+    %assign addr addr+0x1000
     %endrep
+    dq 0xB8000 | (PAGE_PRESENT | PAGE_WRITE | PAGE_WRITE_THROUGH)
+    dq 0x00
 
 
-; pad to 64KiB
+%if (($ - $$) > (64 * 1024))
+%error "Code or Data too large, maximum is 64KiB"
+%else
 times ((64 * 1024) - ($ - $$)) db 0
-
+%endif
+; pad to 64KiB
 
 %include "layout.asm"

@@ -35,10 +35,16 @@ Value     Name
 00001000  dyndata.alias_pdp
 00002000  dyndata.alias_pd
 00003000  dyndata.alias_pt
+00004000  dyndata.cursor_x
+00004000  dyndata.cursor_y
+00004000  dyndata.old_stack
+00004008  dyndata.reached_rsp
 00007000  early_stack
 00007C00  bootsec
 00007E00  loaded_binary
 00018000  video_page
+00019000  guard_page
+00040000  backing_page
 
 
 ---- Section .text ------------------------------------------------------------
@@ -52,26 +58,29 @@ Real              Virtual           Name
             7C39              7C39  bios_print.done
             7C3C              7C3C  DiskPackage
             7C4C              7C4C  DiskError
-            7E00              7E00  UnsupportedCPU
-            7E06              7E06  StartupError
-            7E0C              7E0C  GDT
-            7E0C              7E0C  GDT.Null
-            7E14              7E14  GDT.Code
-            7E26              7E26  GDT.Pointer
-            7E2C              7E2C  IDTR
-            7E2C              7E2C  IDTR.Limit
-            7E2E              7E2E  IDTR.Base
-            7E32              7E32  check_cpu
-            7E7D              7E7D  check_cpu.unsupported
-            7E7F              7E7F  Message
-            7E8F              7E8F  _loaded16
-            7EDE              7EDE  _loaded16.startup_error
-            7EE7              7EE7  _loaded16.unsupported_cpu
-            7EF0              7EF0  _loaded16.long
-            7F00              7F00  _start
-            7F04              7F04  paging
-            7F04              7F04  paging.pml4
-            8F04              8F04  paging.pdp
-            9F04              9F04  paging.pd
-            AF04              AF04  paging.pt
+            7C53              7C53  UnsupportedCPU
+            7C59              7C59  StartupError
+            7E00              7E00  GDT
+            7E00              7E00  GDT.Null
+            7E08              7E08  GDT.Code
+            7E1A              7E1A  GDT.Pointer
+            7E20              7E20  IDTR
+            7E20              7E20  IDTR.Limit
+            7E22              7E22  IDTR.Base
+            7E26              7E26  stack_top
+            7E2E              7E2E  Message
+            7E3F              7E3F  _loaded16
+            7E8B              7E8B  _loaded16.startup_error
+            7E94              7E94  _loaded16.unsupported_cpu
+            7E9D              7E9D  _loaded16.long
+            7EAD              7EAD  interlink_alias_pagetables
+            7EF0              7EF0  _start
+            7F22              7F22  counter_fun
+            7F2F              7F2F  counter_fun.stop
+            7F30              7F30  run_fun_bounded
+            8000              8000  paging
+            8000              8000  paging.pml4
+            9000              9000  paging.pdp
+            A000              A000  paging.pd
+            B000              B000  paging.pt
 
