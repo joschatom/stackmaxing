@@ -6,12 +6,18 @@
 %define ADDR_OF_LOCAL(sym) ((sym - $$) + 0x7C00)
 %define FAR_READ(sym) [fs:((sym) - $$ + 512)]
 
+%macro live_eval 1
+%warning %hex(%[(%eval(%1)])
+%endmacro
+
 %define PAGE_PRESENT            (1 << 0)
 %define PAGE_WRITE              (1 << 1)
 %define PAGE_WRITE_THROUGH      (1 << 3)
 
 %define CODE_SEG     0x0008
 %define DATA_SEG     0x0010
+%define TASK_SEG     0x0018
+
 
 start16:
         xor ax, ax
@@ -79,26 +85,7 @@ StartupError db "UNK", 0x0A, 0x0D, 0x00
 
 times (510 - ($ - $$)) db 0
 dw 0xAA55
-
-GDT:
-.Null:
-    dq 0x0000000000000000             ; Null Descriptor - should be present.
-
-.Code:
-    dq 0x00209A0000000000             ; 64-bit code descriptor (exec/read).
-    dq 0x0000920000000000             ; 64-bit data descriptor (read/write).
-      
-ALIGN 4
-    dw 0                              ; Padding to make the "address of the GDT" field aligned on a 4-byte boundary
-
-.Pointer:
-    dw $ - GDT - 1                    ; 16-bit Size (Limit) of GDT.
-    dd ADDR_OF_LOCAL(GDT)                            ; 32-bit Base Address of GDT. (CPU will zero extend to 64-bit)
-
-align 4
-IDTR:
-        .Limit dw 0
-        .Base dd 0
+                 
 
 stack_top dq -1
 Message db "Hello, World!$", 0x0A, 0x0D, 0x00
@@ -113,7 +100,7 @@ _loaded16:
     out 0xA1, al
     out 0x21, al
 
-    lidt FAR_READ(IDTR)                        ; Load a zero length IDT so that any NMI causes a triple fault.
+    lidt [early_idtr]                        ; Load a zero length IDT so that any NMI causes a triple fault.
 
     ; Enter long mode.
     mov eax, 10100000b                ; Set the PAE and PGE bit.
@@ -134,9 +121,8 @@ _loaded16:
 
     cli
     lgdt [GDT.Pointer]                ; Load GDT.Pointer defined below
-
-      
-    jmp CODE_SEG:.long             ; Load CS with 64 bit segment and flush the instruction cache
+    
+    jmp CODE_SEG:_start64             ; Load CS with 64 bit segment and flush the instruction cache
       
 .startup_error: 
         mov si, StartupError
@@ -148,9 +134,145 @@ _loaded16:
         call bios_print
         jmp die
 
+
+%define IST_INDEX 1
+%macro tss_segment 2
+    %push tss
+    %define _base ( %1 )
+    %define _limit ( %2 )
+    dw (_limit & 0xFFFF)
+    dw (_base & 0xFFFF)
+
+    db ((_base >> 16) & 0xFF)
+    db 0x89 ; Present 64-bit TSS (DPL 0)
+
+    db ((_limit >> 16) & 0xF)
+    db ((_base >> 24) & 0xFF)
+
+    dd ((_base >> 32) & 0xFFFFFFFF)
+    dd 0x0
+    %pop 
+%endmacro
+
+GDT:
+.Null:
+    dq 0x0000000000000000             ; Null Descriptor - should be present.
+
+.Code:
+    dq 0x00209A0000000000             ; 64-bit code descriptor (exec/read).
+    dq 0x0000920000000000             ; 64-bit data descriptor (read/write).
+
+.tss: tss_segment ADDR_OF_LOCAL(TSS), (TSS.end - TSS - 1)
+
+ALIGN 4
+    db 0
+.Pointer:
+    dw $ - GDT - 1                                   ; 16-bit Size (Limit) of GDT.
+    dd GDT                            ; 32-bit Base Address of GDT. (CPU will zero extend to 64-bit)
+
+TSS:
+    dd 0
+    ; we don't use the RSP{0,1,2} pointers
+    times 3 dq 0x0
+    dd 0
+    ; ist 1, used in nearly every interrupt*.
+    dw (dyndata.trap_stack && 0xFFFF)
+    dw ((dyndata.trap_stack >> 16) && 0xFFFF)
+
+    ; all the other ISTs are unused
+    times 6 dd 0x00
+
+    dd 0x0
+
+    ; no io protection bitmap
+    dw $ - TSS
+.end: resb 0
+
+%define IST_INDEX 1
+%macro idt_entry 2
+    %push idte
+    %define _offset ( %1 )
+    %define _type_attrs %cond(%2, 0x8E, 0x8F)
+    dw (_offset & 0xFFFF)
+    dw CODE_SEG
+    db IST_INDEX
+    db _type_attrs
+    dw ((_offset >> 16) & 0xFFFF)
+    dd ((_offset >> 32) & 0xFFFFFFFF)
+    dd 0x0
+    %pop idte
+%endmacro
+
+
+%define ALIGN_PADDING(addr, align) (align - (addr & (align - 1))) & (align - 1);
+%macro ALIGN_PAD 1
+    times ALIGN_PADDING(ADDR_OF_LOCAL($), 0x1000) db 0
+%endmacro
+
+early_idtr:
+    dw 0
+    dd 0x0
+
+;; idt for the first 64 interrupts
+IDT:
+    
+    ; div_error
+    dq 0x0, 0x0
+    ; debug
+    dq 0x0, 0x0
+    ; hw_nmi
+    dq 0x0, 0x0
+    ; breakpoint
+    dq 0x0, 0x0
+    ; overflow:
+    dq 0x0, 0x0
+    ; out_of_bounds:
+    dq 0x0, 0x0
+    ; invalid_opcode:
+    dq 0x0, 0x0
+    ; device_unavailable:
+    dq 0x0, 0x0
+    ; double_fault:
+    dq 0x0, 0x0
+    ; _old_unused:
+    dq 0x0, 0x0
+    ; invalid_tss:
+    dq 0x0, 0x0
+    ; segment_not_present:
+    dq 0x0, 0x0
+    ; stack_segment_fault: 
+    idt_entry  ADDR_OF_LOCAL(handle_gp_fault), 1
+    ; general_protection_fault:  
+     idt_entry  ADDR_OF_LOCAL(handle_gp_fault), 1
+    ; page_fault: 
+    idt_entry 0x0, 1
+    ; _intel_reserved: 
+    dq 0x0, 0x0; idt_entry ADDR_OF_LOCAL(handle_gp_fault), 1
+    ; x87_fpu_fault:
+    dq 0x0, 0x0 ;idt_entry ADDR_OF_LOCAL(handle_gp_fault), 1
+    ; alignment_check: 
+    dq 0x0, 0x0
+    ; machine_check: 
+    dq 0x0, 0x0
+    
+    ; other exceptions
+    times 19 dq 0x0, 0x0
+
+    ; os services (unused rn)
+    dq 0x0, 0x0
+
+    ; other 32 idt entires (for later maybe)
+    times 32 dq 0
+
+.register: 
+    dw $ - IDT - 1                                
+    dq IDT  
+
 [bits 64]
 
-.long:
+_start64:
+    lidt [IDT.register]
+
     mov ax, DATA_SEG
     mov ds, ax
     mov es, ax
@@ -158,10 +280,74 @@ _loaded16:
     mov gs, ax
     mov ss, ax
 
+
+    mov ax, TASK_SEG
+    ltr ax
+
     jmp _start
 
 ;;; LONG MODE ;;;
 
+
+%define interrupt_begin interrupt_begin_ rax, rbx, rcx, rdx, rsi, rdi, r11, r12
+%macro interrupt_begin_ 1-*
+    nop
+
+    %push intctx
+    push rbp
+    mov rbp, rsp
+
+    %define old_rsp [rbp - 32]
+    %define old_rflags [rbp - 16 - 8]
+    %define old_rip [rbp - 8]
+    %define old_rbp [rbp]
+
+    %define __saved_regs  %[%{-1:1}]
+    %assign __save_depth 1
+    %rep  %0
+        %define old_%[%1] qword [rbp + (__save_depth * 8)]
+        push    %1
+    %rotate 1 
+    %endrep 
+
+%endmacro
+
+%define interrupt_end interrupt_end_ __saved_regs
+%macro interrupt_end_ 1-*
+    pop rbp
+
+    %rep %0
+        pop    %1
+    %rotate 1 
+    %endrep 
+    %pop intctx
+
+    iret
+%endmacro
+
+handle_gp_fault:
+    
+    ; fast skip over non canonical region
+   ; test qword [rsp - 32], 0x7FFFFFFFFFFF
+   ; jnz .handler
+    mov rax, [rsp]
+    mov rbx, [rsp + 8]
+    mov rcx, [rsp + 32]
+
+    hlt
+    ;not qword [dyndata.trap_stack]
+    iretq
+
+.handler: 
+    hlt
+
+    pop rax
+
+
+.skip_hole:
+    
+
+; %warning %[%eval($ - handle_ss_fault)]
 
 ; setup links between alias page tables levels
 ; and final page table to point to single backing page
@@ -207,7 +393,7 @@ _start:
 
     mov rax, [-1]
  
-    mov rcx, 1000000000
+    mov rcx, 0x1000000
     mov r11, counter_fun
     call run_fun_bounded
 
@@ -225,7 +411,7 @@ counter_fun:
 ; NOTE: the function must meet certain requirements. See `counter_fun` for details.
 run_fun_bounded:
     mov [dyndata.old_stack], rsp
-    mov rsp, 0x1000
+    mov rsp, 0xFFFF800000010000
 
     call r11
 
@@ -235,10 +421,6 @@ run_fun_bounded:
     ret
 
 
-%define ALIGN_PADDING(addr, align) (align - (addr & (align - 1))) & (align - 1);
-%macro ALIGN_PAD 1
-    times ALIGN_PADDING(ADDR_OF_LOCAL($), 0x1000) db 0
-%endmacro
 
 ALIGN_PAD 0x1000
 paging:

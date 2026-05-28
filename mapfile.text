@@ -1,8 +1,8 @@
 
 - NASM Map file ---------------------------------------------------------------
 
-Source file:  /tmp/nasmValidator/in.asm
-Output file:  /tmp/nasmValidator/out.o
+Source file:  load.asm
+Output file:  load.bin
 
 -- Program origin -------------------------------------------------------------
 
@@ -39,6 +39,8 @@ Value     Name
 00004000  dyndata.cursor_y
 00004000  dyndata.old_stack
 00004008  dyndata.reached_rsp
+00005008  dyndata.old_rsp
+00005010  dyndata.trap_stack
 00007000  early_stack
 00007C00  bootsec
 00007E00  loaded_binary
@@ -60,27 +62,33 @@ Real              Virtual           Name
             7C4C              7C4C  DiskError
             7C53              7C53  UnsupportedCPU
             7C59              7C59  StartupError
-            7E00              7E00  GDT
-            7E00              7E00  GDT.Null
-            7E08              7E08  GDT.Code
-            7E1A              7E1A  GDT.Pointer
-            7E20              7E20  IDTR
-            7E20              7E20  IDTR.Limit
-            7E22              7E22  IDTR.Base
-            7E26              7E26  stack_top
-            7E2E              7E2E  Message
-            7E3F              7E3F  _loaded16
-            7E8B              7E8B  _loaded16.startup_error
-            7E94              7E94  _loaded16.unsupported_cpu
-            7E9D              7E9D  _loaded16.long
-            7EAD              7EAD  interlink_alias_pagetables
-            7EF0              7EF0  _start
-            7F22              7F22  counter_fun
-            7F2F              7F2F  counter_fun.stop
-            7F30              7F30  run_fun_bounded
-            8000              8000  paging
-            8000              8000  paging.pml4
-            9000              9000  paging.pdp
-            A000              A000  paging.pd
-            B000              B000  paging.pt
+            7E00              7E00  stack_top
+            7E08              7E08  Message
+            7E19              7E19  _loaded16
+            7E64              7E64  _loaded16.startup_error
+            7E6D              7E6D  _loaded16.unsupported_cpu
+            7E76              7E76  GDT
+            7E76              7E76  GDT.Null
+            7E7E              7E7E  GDT.Code
+            7E8E              7E8E  GDT.tss
+            7EA1              7EA1  GDT.Pointer
+            7EA7              7EA7  TSS
+            7EE9              7EE9  TSS.end
+            7EE9              7EE9  early_idtr
+            7EEF              7EEF  IDT
+            825F              825F  IDT.register
+            8269              8269  _start64
+            8288              8288  handle_gp_fault
+            8299              8299  handle_gp_fault.handler
+            829B              829B  handle_gp_fault.skip_hole
+            829B              829B  interlink_alias_pagetables
+            82DE              82DE  _start
+            8310              8310  counter_fun
+            831D              831D  counter_fun.stop
+            831E              831E  run_fun_bounded
+            9000              9000  paging
+            9000              9000  paging.pml4
+            A000              A000  paging.pdp
+            B000              B000  paging.pd
+            C000              C000  paging.pt
 

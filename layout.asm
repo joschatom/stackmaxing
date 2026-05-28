@@ -8,6 +8,9 @@ dyndata:
     .cursor_y: resw 0
     .old_stack: resq 1
     .reached_rsp: resq 1
+    resq 511
+    .old_rsp: resq 1
+    .trap_stack: resq 0
 
 
 absolute 0x7000
