@@ -13,7 +13,7 @@
 
 %define CODE_SEG     0x0008
 %define DATA_SEG     0x0010
-%define TASK_SEG     0x0018
+%define TASK_SEG     0x0016
 
 extern __bss_start
 extern __bss_end
@@ -248,7 +248,7 @@ GDT:
 .tss:
     dw (TSS.end - TSS - 1)
     dw TSS
-    dw 0x8900
+    dw 0x89
     dw 0x0
     dq 0x0
 
@@ -264,15 +264,17 @@ TSS:
     times 3 dq 0x0
     dq 0
     ; ist 1, used in nearly every interrupt*.
-    dq dyndata.trap_stack
+    dd DATA_SEG
+    dd trap_stack.top
 
     ; all the other ISTs are unused
     times 6 dd 0x00
 
-    dd 0x0
+    dq 0x0
 
     ; no io protection bitmap
-    dw $ - TSS
+    dw 0x0
+    dw .end - TSS
 .end: resb 0
 
 %define IST_INDEX 1
@@ -374,26 +376,29 @@ _start64:
     iret
 %endmacro
 
+
+
 handle_ss_fault:
+    jmp handle_gp_fault
 handle_gp_fault:
+    
+    mov rax, trap_stack.top
+    mfence
+    jmp $ 
+
+    cli
+
     ; fast skip over non canonical region
-    mov rax, [rsp + 32]
-    add rax, 8
-    mov rbx, rax
-    and rax, 0x7FFFFFFFFFFF
- 
+    mov rdx, [trap_stack.top]
+
     hlt
-    iretq
 .handler: 
-        mov rax, qword [rsp + 32]
-    and rax, 0x7FFFFFFFFFFF
     hlt
 
 %define _IDTE_META (\
-    1 << 31 \
-    | 0x8F << 24 \
-    | IST_INDEX << 16 \
-    | CODE_SEG \
+    1 << (31 - 16) \
+    | 0x8F << (24 - 16) \
+    | IST_INDEX  \
 )
 ; rax = entry num
 ; rbx = handler
@@ -401,8 +406,8 @@ set_idt_entry:
     shl rax, 4
     add rax, IDT
 
-    mov dword [rax + 2], _IDTE_META
-
+    mov dword [rax + 4], _IDTE_META
+    mov word [rax + 2], CODE_SEG
     mov word [rax], bx
 
     shr ebx, 4
@@ -482,14 +487,18 @@ counter_fun:
 ; NOTE: the function must meet certain requirements. See `counter_fun` for details.
 run_fun_bounded:
     mov [dyndata.old_stack], rsp
-    mov rsp, 0xFFFF800000000000
+    mov rsp, 0xFFFF800000000100
 
     call r11
 
-    mov [dyndata.reached_rsp], rsp
     mov rsp, [dyndata.old_stack] ; restore
 
     ret
+
+section .data
+trap_stack:     
+    times 512 dq 0x0
+trap_stack.top: resb 0 
 
 section .real.bss
 align 0x1000
@@ -518,4 +527,19 @@ pt:
 ; dq 0x00
 
 
-%include "layout.asm"
+
+section .bss
+align 0x1000
+dyndata:
+    .alias_pdp: resq 512
+    .alias_pd: resq 512
+    .alias_pt resq 512
+    .cursor_x: resw 0
+    .cursor_y: resw 0
+    .old_stack: resq 1
+
+
+
+section .real.bss
+align 0x1000
+backing_page: resb 0x1000
