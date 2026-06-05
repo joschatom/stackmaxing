@@ -1,99 +1,17 @@
 [warning -zeroing]
 [bits 16]
 
-%define ADDR_OF_LOCAL(sym) ((sym - $$) + 0x7C00)
-
-%macro live_eval 1
-%warning %hex(%[(%eval(%1)])
-%endmacro
-
-%define PAGE_PRESENT            (1 << 0)
-%define PAGE_WRITE              (1 << 1)
-%define PAGE_WRITE_THROUGH      (1 << 3)
-
-%define CODE_SEG     0x0008
-%define DATA_SEG     0x0010
-%define TASK_SEG     0x0016
-
-extern __bss_start
-extern __bss_end
-section .real.bootsec
-bits 16
-start16:
-        xor ax, ax
-        mov ss, ax
-
-
-        mov es, ax
-        mov ds, ax
-        mov gs, ax
-
-        mov sp, stack.top
-
-        mov ax, (0x18000 / 16)
-        mov fs, ax
-
-        cld
-
-    
-        mov si, DiskPackage
-        mov dl, 0x80
-        mov ah, 0x42
-        int 0x13
-        
-        jc .disk_error
-
-        jmp _loaded16
-
-.disk_error:
-        mov si, DiskError
-        call bios_print
-        jmp die
-
-die: 
-        hlt
-        jmp die
-
-bios_print:
-    pushad
-.loop:
-    lodsb                             ; Load the value at [@es:@si] in @al.
-    test al, al                       ; If AL is the terminator character, stop printing.
-    je .done                 	
-    mov ah, 0x0E	
-    int 0x10
-    jmp .loop
-	
-.done:
-    popad                             ; Pop all general purpose registers to save them.
-    ret
-
-DiskPackage: 
-        db 0x10
-        db 0x00
-        dw 127
-        dw 0x7E00
-        dw 0
-        dd 1 ; LBA#1
-        dd 0
-
-times (510 - ($ - $$)) db 0
-dw 0xAA55
-
-section .bss
-stack:
-    resb 0x1000
-.top: resb 0
+%include "defs.inc"
+%include "bios.inc"
 
 section .real.data
-DiskError db "DISK", 0x0A, 0x0D, 0x00
-UnsupportedCPU db "CPU", 0x0A, 0x0D, 0x00
-StartupError db "UNK", 0x0A, 0x0D, 0x00 
-stack_top dq -1
 Message db "Hello, World!$", 0x0A, 0x0D, 0x00
+UnsupportedCPU db "CPU", 0x0A, 0x0D, 0x00
+StartupError db "UNK", 0x0A, 0x0D, 0x00
 
 section .real.text
 bits 16
+global _loaded16:function
 _loaded16:
     mov si, Message
     call bios_print
@@ -106,8 +24,6 @@ _loaded16:
     out 0x21, al
 
     lidt [early_idtr]                        ; Load a zero length IDT so that any NMI causes a triple fault.
-
-
 
     ; Enter long mode.
     mov eax, 10100000b                ; Set the PAE and PGE bit.
@@ -377,7 +293,7 @@ _start64:
 %endmacro
 
 
-
+; FIXME: There is a bug here that causes a reset.
 handle_ss_fault:
     jmp handle_gp_fault
 handle_gp_fault:
@@ -487,7 +403,7 @@ counter_fun:
 ; NOTE: the function must meet certain requirements. See `counter_fun` for details.
 run_fun_bounded:
     mov [dyndata.old_stack], rsp
-    mov rsp, 0xFFFF800000000100
+    mov rsp, 0x1000
 
     call r11
 
@@ -514,19 +430,6 @@ pd:
 pt:
     .rel: equ ($ - 0x18000)
     resq 512
-
-
-; null page
-; dq 0x21000 | (PAGE_PRESENT | PAGE_WRITE)
-; %assign addr 0x1000
-; %rep (0x17000) / 0x1000
-;     dq addr | (PAGE_PRESENT | PAGE_WRITE)
-; %assign addr addr+0x1000
-; %endrep
-; dq 0xB8000 | (PAGE_PRESENT | PAGE_WRITE | PAGE_WRITE_THROUGH)
-; dq 0x00
-
-
 
 section .bss
 align 0x1000

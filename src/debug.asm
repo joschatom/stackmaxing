@@ -8,7 +8,6 @@ section .text
 ; rbx = stack pointer
 ; returns depth in RAX
 
-
 global calc_stack_depth:function
 calc_stack_depth:
     test rbx, ~0xFFF

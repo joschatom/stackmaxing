@@ -6,6 +6,8 @@ MEMORY {
 }
 
 SECTIONS {
+
+
     . = 0x1000;
 
     .bss (NOLOAD) : {
@@ -56,11 +58,10 @@ SECTIONS {
         __lower_half_start = ABSOLUTE(0x20000);
     }
 
-
     .real.bss (NOLOAD) : {
         __real_bss_start = .;
         *(.real.bss real.bss.*)
-        __real_bss_start = .;
+        __real_bss_end = .;
     } > POSTMEM
 
     /DISCARD/ : {
